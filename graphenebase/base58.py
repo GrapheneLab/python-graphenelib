@@ -53,7 +53,7 @@ class Base58(object):
             self._hex = data
         elif data[0] == "5" or data[0] == "6":
             self._hex = base58CheckDecode(data)
-        elif data[0] == "K" or data[0] == "L":
+        elif data[0] == "X" or data[0] == "L":
             self._hex = base58CheckDecode(data)[:-2]
         elif data[:len(self._prefix)] == self._prefix:
             self._hex = gphBase58CheckDecode(data[len(self._prefix):])

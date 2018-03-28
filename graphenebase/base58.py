@@ -19,7 +19,7 @@ known_prefixes = [
     "STM",
     "GLX",
     "GLS",
-    "KRM",
+    "XZEN",
 ]
 
 

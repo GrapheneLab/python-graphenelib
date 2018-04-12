@@ -1,15 +1,18 @@
+import sys
+import logging
 import hashlib
 from binascii import hexlify, unhexlify
-import sys
 from .account import PrivateKey
 from .base58 import Base58, base58decode
-import logging
 log = logging.getLogger(__name__)
 
 try:
-    from Crypto.Cipher import AES
+    from Cryptodome.Cipher import AES
 except ImportError:
-    raise ImportError("Missing dependency: pycrypto")
+    try:
+        from Crypto.Cipher import AES
+    except ImportError:
+        raise ImportError("Missing dependency: pyCryptodome")
 
 SCRYPT_MODULE = None
 if not SCRYPT_MODULE:
@@ -26,9 +29,6 @@ if not SCRYPT_MODULE:
             )
 
 log.debug("Using scrypt module: %s" % SCRYPT_MODULE)
-
-""" This class and the methods require python3 """
-assert sys.version_info[0] == 3, "graphenelib requires python3"
 
 
 class SaltException(Exception):
@@ -53,7 +53,10 @@ def encrypt(privkey, passphrase):
     """
     privkeyhex = repr(privkey)   # hex
     addr = format(privkey.uncompressed.address, "BTC")
-    a = bytes(addr, 'ascii')
+    if sys.version > '3':
+        a = bytes(addr, 'ascii')
+    else:
+        a = bytes(addr).encode('ascii')
     salt = hashlib.sha256(hashlib.sha256(a).digest()).digest()[0:4]
     if SCRYPT_MODULE == "scrypt":
         key = scrypt.hash(passphrase, salt, 16384, 8, 8)
@@ -62,7 +65,7 @@ def encrypt(privkey, passphrase):
     else:
         raise ValueError("No scrypt module loaded")
     (derived_half1, derived_half2) = (key[:32], key[32:])
-    aes = AES.new(derived_half2)
+    aes = AES.new(derived_half2, AES.MODE_ECB)
     encrypted_half1 = _encrypt_xor(privkeyhex[:32], derived_half1[:16], aes)
     encrypted_half2 = _encrypt_xor(privkeyhex[32:], derived_half1[16:], aes)
     " flag byte is forced 0xc0 because Graphene only uses compressed keys "
@@ -102,7 +105,7 @@ def decrypt(encrypted_privkey, passphrase):
     derivedhalf2 = key[32:64]
     encryptedhalf1 = d[0:16]
     encryptedhalf2 = d[16:32]
-    aes = AES.new(derivedhalf2)
+    aes = AES.new(derivedhalf2, AES.MODE_ECB)
     decryptedhalf2 = aes.decrypt(encryptedhalf2)
     decryptedhalf1 = aes.decrypt(encryptedhalf1)
     privraw = decryptedhalf1 + decryptedhalf2
@@ -112,7 +115,10 @@ def decrypt(encrypted_privkey, passphrase):
     """ Verify Salt """
     privkey = PrivateKey(format(wif, "wif"))
     addr = format(privkey.uncompressed.address, "BTC")
-    a = bytes(addr, 'ascii')
+    if sys.version > '3':
+        a = bytes(addr, 'ascii')
+    else:
+        a = bytes(addr).encode('ascii')
     saltverify = hashlib.sha256(hashlib.sha256(a).digest()).digest()[0:4]
     if saltverify != salt:
         raise SaltException('checksum verification failed! Password may be incorrect.')

@@ -1,21 +1,14 @@
-import sys
-import threading
 import websocket
-import ssl
+# import ssl
 import json
 import time
-from itertools import cycle
-import warnings
 import logging
+from .exceptions import (
+    RPCError,
+    NumRetriesReached
+)
+from itertools import cycle
 log = logging.getLogger(__name__)
-
-
-class RPCError(Exception):
-    pass
-
-
-class NumRetriesReached(Exception):
-    pass
 
 
 class GrapheneWebsocketRPC(object):
@@ -28,8 +21,9 @@ class GrapheneWebsocketRPC(object):
         :param str urls: Either a single Websocket URL, or a list of URLs
         :param str user: Username for Authentication
         :param str password: Password for Authentication
-        :param Array apis: List of APIs to register to (default: ["database", "network_broadcast"])
-        :param int num_retries: Try x times to num_retries to a node on disconnect, -1 for indefinitely
+        :param Array apis: List of APIs to register to
+        :param int num_retries: Try x times to num_retries to a node on
+               disconnect, -1 for indefinitely
 
         Available APIs
 
@@ -50,7 +44,7 @@ class GrapheneWebsocketRPC(object):
                   subsystem, please use ``GrapheneWebsocket`` instead.
 
     """
-    def __init__(self, urls, user="", password="", **kwargs):
+    def __init__(self, urls, user=None, password=None, **kwargs):
         self.api_id = {}
         self._request_id = 0
         if isinstance(urls, list):
@@ -68,6 +62,15 @@ class GrapheneWebsocketRPC(object):
         self._request_id += 1
         return self._request_id
 
+    def next(self):
+        if self.ws:
+            try:
+                self.ws.close()
+            except Exception:
+                pass
+        self.wsconnect()
+        self.register_apis()
+
     def wsconnect(self):
         cnt = 0
         while True:
@@ -75,7 +78,7 @@ class GrapheneWebsocketRPC(object):
             self.url = next(self.urls)
             log.debug("Trying to connect to node %s" % self.url)
             if self.url[:3] == "wss":
-                sslopt_ca_certs = {'cert_reqs': ssl.CERT_NONE}
+                sslopt_ca_certs = {}  # {'cert_reqs': ssl.CERT_NONE}
                 self.ws = websocket.WebSocket(sslopt=sslopt_ca_certs)
             else:
                 self.ws = websocket.WebSocket()
@@ -84,24 +87,31 @@ class GrapheneWebsocketRPC(object):
                 break
             except KeyboardInterrupt:
                 raise
-            except:
-                if (self.num_retries >= 0 and cnt > self.num_retries):
+            except Exception as e:
+                log.warning(str(e))
+                if (self.num_retries > -1 and
+                        cnt > self.num_retries):
                     raise NumRetriesReached()
-
                 sleeptime = (cnt - 1) * 2 if cnt < 10 else 10
                 if sleeptime:
                     log.warning(
-                        "Lost connection to node during wsconnect(): %s (%d/%d) "
+                        "Lost connection to node during rpcexec(): %s (%d/%d) "
                         % (self.url, cnt, self.num_retries) +
                         "Retrying in %d seconds" % sleeptime
                     )
                     time.sleep(sleeptime)
-        self.login(self.user, self.password, api_id=1)
+        if self.user and self.password:
+            self.login(self.user, self.password, api_id=1)
 
     def register_apis(self):
+        """
+        # We no longer register to those apis separately because we can instead
+        # name them when doing a call
         self.api_id["database"] = self.database(api_id=1)
         self.api_id["history"] = self.history(api_id=1)
         self.api_id["network_broadcast"] = self.network_broadcast(api_id=1)
+        """
+        pass
 
     """ RPC Calls
     """
@@ -109,7 +119,8 @@ class GrapheneWebsocketRPC(object):
         """ Execute a call by sending the payload
 
             :param json payload: Payload data
-            :raises ValueError: if the server does not respond in proper JSON format
+            :raises ValueError: if the server does not respond in proper JSON
+            format
             :raises RPCError: if the server returns an error
         """
         log.debug(json.dumps(payload))
@@ -118,12 +129,14 @@ class GrapheneWebsocketRPC(object):
             cnt += 1
 
             try:
-                self.ws.send(json.dumps(payload, ensure_ascii=False).encode('utf8'))
+                self.ws.send(
+                    json.dumps(payload, ensure_ascii=False).encode('utf8')
+                )
                 reply = self.ws.recv()
                 break
             except KeyboardInterrupt:
                 raise
-            except:
+            except Exception:
                 if (self.num_retries > -1 and
                         cnt > self.num_retries):
                     raise NumRetriesReached()
@@ -142,7 +155,7 @@ class GrapheneWebsocketRPC(object):
                     time.sleep(sleeptime)
                     self.wsconnect()
                     self.register_apis()
-                except:
+                except Exception:
                     pass
 
         ret = {}
@@ -175,11 +188,16 @@ class GrapheneWebsocketRPC(object):
                             self.api_id[kwargs["api"]]):
                         api_id = self.api_id[kwargs["api"]]
                     else:
+                        # Try the query by providing the argument
+                        # right away
+                        api_id = kwargs["api"]
+                        """
                         raise ValueError(
                             "Unknown API! "
                             "Verify that you have registered to %s"
                             % kwargs["api"]
                         )
+                        """
                 else:
                     api_id = 0
             else:

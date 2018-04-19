@@ -17,6 +17,7 @@ known_prefixes = [
     "GLX",
     "GLS",
     "KRM",
+    "KRMT",
 ]
 
 
